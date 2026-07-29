@@ -1,6 +1,5 @@
 """
-ATELIER // LATENT — a darkroom UI wrapped around your notebook.
-The engine IS your notebook (see "THE CORE" below). Everything else is UI/CSS.
+Optimized with the lightest & fastest models to run in Streamlit!
 Run:      streamlit run app.py
 Install:  pip install streamlit torch diffusers transformers accelerate safetensors pillow
 """
@@ -183,9 +182,9 @@ st.markdown("<style>" + CSS + "</style>", unsafe_allow_html=True)
 
 # ──────────────────────────── config (UI knobs only) ──────────────
 MODELS = {
+    "Tiny SD · lightest (~800MB)": "segmind/tiny-sd",          # BEST FOR STREAMLIT RAM
+    "SD Turbo · ultra fast (1-4 steps)": "stabilityai/sd-turbo",
     "SD 1.5 · base (notebook)": "runwayml/stable-diffusion-v1-5",
-    "DreamShaper 8 · artistic": "Lykon/dreamshaper-8",
-    "SD 2.1 · base": "stabilityai/stable-diffusion-2-1",
 }
 SIZES = {"512 × 512 — square": (512, 512),
          "512 × 768 — portrait": (512, 768),
@@ -202,8 +201,10 @@ SURPRISES = [
 # ──────────────────────────── helpers (UI only) ───────────────────
 @st.cache_resource(show_spinner=False)
 def load_pipe(model_id):
-    """Your notebook's Step 1, cached so the model loads once."""
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+    """Loads the model. Optimized dtype & RAM slicing for Streamlit."""
+    # float16 on GPU saves half the VRAM. float32 on CPU is required by PyTorch.
+    dtype = torch.float16 if DEVICE == "cuda" else torch.float32
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=dtype)
     pipe = pipe.to(DEVICE)
     if DEVICE == "cpu":                      # keep peak RAM low so CPU actually finishes
         pipe.enable_attention_slicing()
@@ -246,13 +247,13 @@ with st.sidebar:
     st.markdown(f'<div class="ds-hint">Device · <b style="color:#f0a93b">{DEVICE.upper()}</b></div>',
                 unsafe_allow_html=True)
     model_name = st.selectbox("Model", list(MODELS) + ["Custom…"])
-    model_id = (st.text_input("HuggingFace model ID", "runwayml/stable-diffusion-v1-5")
+    model_id = (st.text_input("HuggingFace model ID", "segmind/tiny-sd")
                 if model_name == "Custom…" else MODELS[model_name])
-    steps    = st.slider("Sampling steps", 10, 80, 30)
-    guidance = st.slider("Guidance scale", 1.0, 20.0, 7.5, 0.5)
+    steps    = st.slider("Sampling steps", 1, 80, 15)  # Lower default for light models
+    guidance = st.slider("Guidance scale", 0.0, 20.0, 7.5, 0.5)
     size     = st.selectbox("Canvas", list(SIZES))
     seed     = st.number_input("Seed  (−1 = random)", -1, 2**31 - 1, -1)
-    st.markdown('<div class="ds-hint">Fewer steps = faster (matters a lot on CPU).<br>'
+    st.markdown('<div class="ds-hint">Using <b>Tiny SD</b> or <b>Turbo</b> makes it fast/light.<br>'
                 'Same seed + same prompt = same image.</div>', unsafe_allow_html=True)
 
 # ──────────────────────────── header ──────────────────────────────
@@ -292,7 +293,7 @@ st.markdown(f'<div class="ds-chips"><span class="ds-chip"><b>steps</b>{steps}</s
 
 if DEVICE == "cpu":
     st.info("No GPU detected — a **real** image will be generated on CPU. "
-            "Expect a few minutes per image; lower the steps slider to speed it up.")
+            "Using **Tiny SD** or **Turbo** keeps it fast and prevents memory crashes.")
 
 b1, b2, b3 = st.columns([3, 1.4, 1.4])
 generate = b1.button("◉ Generate", type="primary", use_container_width=True)
@@ -311,12 +312,19 @@ if generate:
     used_seed = random.randint(0, 2**31 - 1) if seed == -1 else seed
     t0 = time.perf_counter()
 
+    # Smart overrides for Turbo models (they require specific settings to not break)
+    is_turbo = "turbo" in model_id.lower() or "lightning" in model_id.lower()
+    if is_turbo:
+        w, h = 512, 512       # SD Turbo strictly requires 512x512
+        steps = min(steps, 4) # Turbo only needs 1-4 steps
+        guidance = 0.0        # Turbo requires NO guidance scale
+
     bar = st.progress(0.0, text="loading model…")
 
     # Step 1: load the model (cached after first run)
     pipe = load_pipe(model_id)
 
-    # live progress while the (possibly long) generation runs
+    # live progress while the generation runs
     def on_step(p, step_index, timestep, kwargs):
         bar.progress((step_index + 1) / steps, text=f"generating · step {step_index + 1}/{steps}")
         return kwargs
@@ -380,5 +388,5 @@ if st.session_state.history:
             st.button(f"↺ #{item['seed']}", key=f"r{item['seed']}",
                       on_click=do_restore, args=(item["seed"],), use_container_width=True)
 
-st.markdown('<div class="ds-kicker" style="margin-top:34px">atelier // latent · streamlit + 🤗 diffusers · SD 1.5</div>',
+st.markdown('<div class="ds-kicker" style="margin-top:34px">atelier // latent · streamlit + 🤗 diffusers</div>',
             unsafe_allow_html=True)
