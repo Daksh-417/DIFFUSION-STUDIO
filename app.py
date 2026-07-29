@@ -328,3 +328,57 @@ if generate:
                          num_inference_steps=steps, guidance_scale=guidance,
                          width=w, height=h,
                          generator=torch.Generator(DEVICE).manual_seed(used_seed),
+                         callback_on_step_end=on_step).images[0]
+        except TypeError:   # older diffusers without the callback kwarg
+            image = pipe(prompt, negative_prompt=negative,
+                         num_inference_steps=steps, guidance_scale=guidance,
+                         width=w, height=h,
+                         generator=torch.Generator(DEVICE).manual_seed(used_seed)).images[0]
+
+    # Step 4: save the image (mirrors your notebook; never breaks the UI)
+    try:
+        image.save("Generated_Image.png")
+    except Exception:
+        pass
+
+    elapsed = time.perf_counter() - t0
+    bar.progress(1.0, text=f"done · {elapsed:.1f}s ✦")
+
+    st.session_state.last = dict(image=image, prompt=prompt, seed=used_seed, steps=steps,
+                                 guidance=guidance, size=f"{w}×{h}", model=model_id, time=elapsed)
+    st.session_state.history.insert(0, st.session_state.last)
+# ══════════════════════════════════════════════════════════════════
+
+# ───────────────────────── latest render ──────────────────────────
+st.markdown('<div class="ds-label">✦ Print</div>', unsafe_allow_html=True)
+if st.session_state.last:
+    r = st.session_state.last
+    view, rail = st.columns([3, 1.1])
+    with view:
+        st.image(r["image"], use_container_width=True)
+    with rail:
+        buf = io.BytesIO(); r["image"].save(buf, "PNG")
+        st.download_button("⬇ Save PNG", buf.getvalue(), f"latent-{r['seed']}.png",
+                           "image/png", use_container_width=True)
+        st.markdown(f'<div class="ds-edge"><b>seed</b>{r["seed"]}<br><b>steps</b>{r["steps"]}<br>'
+                    f'<b>cfg</b>{r["guidance"]}<br><b>size</b>{r["size"]}<br>'
+                    f'<b>time</b>{r["time"]:.1f}s<br>'
+                    f'<b>model</b>{r["model"].split("/")[-1]}</div>', unsafe_allow_html=True)
+        st.caption(f"“{r['prompt']}”")
+else:
+    st.markdown('<div class="ds-empty"><div class="t">the tray is empty</div>'
+                '<div class="s">write a prompt · hit generate · watch it surface</div></div>',
+                unsafe_allow_html=True)
+
+# ──────────────────────── film-strip gallery ──────────────────────
+if st.session_state.history:
+    st.markdown('<div class="ds-label">✦ Contact sheet</div>', unsafe_allow_html=True)
+    st.markdown(build_strip(st.session_state.history), unsafe_allow_html=True)
+    rc = st.columns(min(len(st.session_state.history), 8))
+    for i, item in enumerate(st.session_state.history[:8]):
+        with rc[i]:
+            st.button(f"↺ #{item['seed']}", key=f"r{item['seed']}",
+                      on_click=do_restore, args=(item["seed"],), use_container_width=True)
+
+st.markdown('<div class="ds-kicker" style="margin-top:34px">atelier // latent · streamlit + 🤗 diffusers · SD 1.5</div>',
+            unsafe_allow_html=True)
