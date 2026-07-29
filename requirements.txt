@@ -4,6 +4,5 @@ diffusers
 transformers
 accelerate
 safetensors
-pillow
-numpy
+Pillow
 torchvision
